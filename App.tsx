@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Sparkles, Command, AlertCircle, Loader2, Download, RefreshCw, Moon, Sun, MonitorPlay, X } from 'lucide-react';
+
+import React, { useState, useEffect, Suspense } from 'react';
+import { Sparkles, Command, AlertCircle, Loader2, Download, RefreshCw, Moon, Sun, MonitorPlay, X, WifiOff, DownloadCloud } from 'lucide-react';
 import JSZip from 'jszip';
 import { MockupSettings, DeviceType, BackgroundStyle, LightingStyle, CameraAngle, GeneratedImage, ContentFit } from './types';
-import Controls from './components/Controls';
 import UploadZone from './components/UploadZone';
-import Gallery from './components/Gallery';
 import { generateMockup, fileToGenerativePart, analyzeAppScreenshot, generateSEOMetadata } from './services/geminiService';
+
+// Lazy load heavy components for better initial load performance
+const Controls = React.lazy(() => import('./components/Controls'));
+const Gallery = React.lazy(() => import('./components/Gallery'));
 
 const DEFAULT_SETTINGS: MockupSettings = {
   deviceType: DeviceType.Smartphone,
@@ -53,6 +56,11 @@ function App() {
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
   const [failedSeoIds, setFailedSeoIds] = useState<Set<string>>(new Set());
   
+  // PWA State
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
   // Replacement State
   const [replacementTarget, setReplacementTarget] = useState<{id: string, file: File} | null>(null);
   const [replacementFit, setReplacementFit] = useState<ContentFit>(ContentFit.Cover);
@@ -62,6 +70,45 @@ function App() {
     // Check local storage or system preference could go here
     return false;
   });
+
+  // PWA & Network Listeners
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    const handleUpdate = () => setUpdateAvailable(true);
+    
+    // Capture install prompt
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('pwa-update-available', handleUpdate);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('pwa-update-available', handleUpdate);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setInstallPrompt(null);
+    }
+  };
+
+  const handleUpdateClick = () => {
+    // Hard reload to skip waiting SW
+    window.location.reload();
+  };
 
   // Apply Dark Mode Class
   useEffect(() => {
@@ -93,6 +140,10 @@ function App() {
   };
 
   const handleAnalyze = async () => {
+    if (isOffline) {
+        setError("You appear to be offline. Analysis requires an internet connection.");
+        return;
+    }
     if (selectedFiles.length === 0) {
       setError("Please upload a screenshot to analyze.");
       return;
@@ -138,6 +189,10 @@ function App() {
   };
 
   const handleGenerate = async () => {
+    if (isOffline) {
+        setError("You appear to be offline. Generation requires an internet connection.");
+        return;
+    }
     if (selectedFiles.length === 0) {
       setError("Please upload at least one screenshot.");
       return;
@@ -254,6 +309,10 @@ function App() {
 
   const executeReplacement = async () => {
     if (!replacementTarget || !process.env.API_KEY) return;
+    if (isOffline) {
+        setError("You appear to be offline. Replacement requires an internet connection.");
+        return;
+    }
     
     setIsGenerating(true);
     setError(null);
@@ -318,6 +377,10 @@ function App() {
   const handleRegenerateSEO = async (id: string) => {
     const image = generatedImages.find(img => img.id === id);
     if (!image) return;
+    if (isOffline) {
+        setError("You appear to be offline.");
+        return;
+    }
 
     setRegeneratingIds(prev => new Set(prev).add(id));
     setFailedSeoIds(prev => {
@@ -483,6 +546,27 @@ Mood: ${img.colorMood}
   return (
     <div className="lg:h-screen flex flex-col bg-slate-50 dark:bg-slate-950 font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900 selection:text-indigo-900 dark:selection:text-indigo-100 transition-colors duration-300 relative">
       
+      {/* Offline Indicator */}
+      {isOffline && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-white text-xs font-bold text-center py-1 shadow-md animate-fade-in flex items-center justify-center gap-2">
+            <WifiOff className="w-3 h-3" />
+            You are currently offline. Check your connection.
+        </div>
+      )}
+
+      {/* Update Available Indicator */}
+      {updateAvailable && (
+        <div className="fixed bottom-4 left-4 z-50 animate-bounce">
+            <button 
+                onClick={handleUpdateClick}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+            >
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                New Version Available (Click to Reload)
+            </button>
+        </div>
+      )}
+
       {/* Replacement Modal */}
       {replacementTarget && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -548,6 +632,17 @@ Mood: ${img.colorMood}
             <a href="https://w3jdev.com" target="_blank" rel="noopener noreferrer" className="ml-1 text-[10px] font-bold text-slate-400 hover:text-indigo-500 transition-colors uppercase tracking-widest border border-slate-200 dark:border-slate-800 px-1.5 py-0.5 rounded-md">by w3jdev</a>
           </div>
           <div className="flex items-center gap-4">
+             {/* Install PWA Button */}
+             {installPrompt && (
+               <button 
+                 onClick={handleInstallClick}
+                 className="hidden md:flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+               >
+                 <DownloadCloud className="w-3.5 h-3.5" />
+                 Install App
+               </button>
+             )}
+
              {generatedImages.length > 0 && (
                 <div className="flex items-center gap-2">
                     {bulkDownloadError && (
@@ -634,14 +729,16 @@ Mood: ${img.colorMood}
                      Configuration
                    </h3>
                  </div>
-                 <Controls 
-                    settings={settings} 
-                    updateSettings={updateSetting} 
-                    disabled={isGenerating} 
-                    onAutoConfigure={handleAnalyze}
-                    isAnalyzing={isAnalyzing}
-                    suggestedBackgrounds={suggestedBackgrounds}
-                  />
+                 <Suspense fallback={<div className="p-4 flex justify-center"><Loader2 className="animate-spin text-indigo-600" /></div>}>
+                    <Controls 
+                        settings={settings} 
+                        updateSettings={updateSetting} 
+                        disabled={isGenerating} 
+                        onAutoConfigure={handleAnalyze}
+                        isAnalyzing={isAnalyzing}
+                        suggestedBackgrounds={suggestedBackgrounds}
+                    />
+                 </Suspense>
               </section>
             </div>
           </div>
@@ -657,10 +754,10 @@ Mood: ${img.colorMood}
               
               <button
                 onClick={handleGenerate}
-                disabled={isGenerating || selectedFiles.length === 0}
+                disabled={isGenerating || selectedFiles.length === 0 || isOffline}
                 className={`
                   w-full py-3.5 px-6 rounded-xl font-bold text-base shadow-lg flex items-center justify-center transition-all transform hover:scale-[1.01] active:scale-[0.99]
-                  ${isGenerating || selectedFiles.length === 0
+                  ${isGenerating || selectedFiles.length === 0 || isOffline
                     ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed shadow-none border border-slate-200 dark:border-slate-700' 
                     : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200 dark:shadow-none'
                   }
@@ -713,16 +810,18 @@ Mood: ${img.colorMood}
               )}
               
               <div className="flex-1">
-                <Gallery 
-                    images={generatedImages} 
-                    onReorder={handleReorder} 
-                    onRefine={handleRefine}
-                    onToggleFavorite={handleToggleFavorite}
-                    onRegenerateSEO={handleRegenerateSEO}
-                    onReplaceImage={handleReplaceImageRequest}
-                    regeneratingIds={regeneratingIds}
-                    failedSeoIds={failedSeoIds}
-                />
+                <Suspense fallback={<div className="w-full h-40 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>}>
+                    <Gallery 
+                        images={generatedImages} 
+                        onReorder={handleReorder} 
+                        onRefine={handleRefine}
+                        onToggleFavorite={handleToggleFavorite}
+                        onRegenerateSEO={handleRegenerateSEO}
+                        onReplaceImage={handleReplaceImageRequest}
+                        regeneratingIds={regeneratingIds}
+                        failedSeoIds={failedSeoIds}
+                    />
+                </Suspense>
               </div>
 
               {/* Footer Stamp */}

@@ -2,9 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="author" content="w3jdev" />
     <meta property="og:site_name" content="MockupGenius AI by w3jdev" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#4f46e5" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MockupGenius" />
+    
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/google-gemini.png" />
+    
     <title>MockupGenius AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -23,6 +33,7 @@
     <style>
       body {
         font-family: 'Inter', sans-serif;
+        overscroll-behavior-y: none; /* Prevents pull-to-refresh on mobile which conflicts with app feel */
       }
       /* Custom scrollbar for gallery */
       .custom-scrollbar::-webkit-scrollbar {
